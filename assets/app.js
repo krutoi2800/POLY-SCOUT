@@ -7,7 +7,7 @@
   let pageLimit = 80; let sortMode='priority'; let onlyDue=false, withContacts=false, confirmedNoSite=false;
   let crm = {};
   try { crm = JSON.parse(localStorage.getItem(STORAGE) || '{}') || {}; } catch { crm = {}; }
-  const state = { leads: [...(window.POLY_SEED || []), ...manual], view: 'search', status: 'all', query: '', city: 'all', niche: 'all', website: 'all', lastUpdate: null, liveCount: 0 };
+  const state = { leads: [...(window.POLY_SEED || []), ...manual], view: 'search', status: 'all', query: '', city: 'all', citySearch:'', niche: 'all', website: 'all', lastUpdate: null, liveCount: 0 };
   const labels = { new: 'Не писал', sent: 'Написал', replied: 'Ответили', negotiation:'Обсуждение', rejected: 'Отказ', deal: 'Договорились' };
   const normalize = v => String(v || '').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').trim();
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -98,10 +98,37 @@
       button.querySelector('.refresh-label').textContent = 'Обновить список';
     }
   }
+  const cityCatalog = Array.isArray(window.POLY_CITY_CATALOG) ? window.POLY_CITY_CATALOG : [];
+  const nicheCatalog = (window.POLY_NICHE_CATEGORIES && typeof window.POLY_NICHE_CATEGORIES === 'object') ? window.POLY_NICHE_CATEGORIES : {};
+  const categoryToGroup = Object.fromEntries(Object.entries(nicheCatalog).flatMap(([group, categories]) => categories.map(category => [category,group])));
   function fillFilters() {
-    const fill = (node, values, all) => { const before = node.value; node.innerHTML = '<option value="all">' + esc(all) + '</option>' + values.map(x => '<option value="' + esc(x) + '">' + esc(x) + '</option>').join(''); node.value = values.includes(before) ? before : 'all'; };
-    fill($('cityFilter'), [...new Set(state.leads.map(x => x.city).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru')), 'Все города');
-    fill($('nicheFilter'), [...new Set(state.leads.map(x => x.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru')), 'Все ниши');
+    const cityCounts = new Map(), nicheCounts = new Map();
+    for (const lead of state.leads) {
+      cityCounts.set(lead.city,(cityCounts.get(lead.city)||0)+1);
+      nicheCounts.set(lead.category,(nicheCounts.get(lead.category)||0)+1);
+    }
+    const cities = [...new Set([...cityCatalog, ...cityCounts.keys()])].sort((a,b)=>a.localeCompare(b,'ru'));
+    const cityField = $('cityFilter');
+    cityField.innerHTML = '<option value="all">Все города (' + state.leads.length + ')</option>' + cities.map(city => '<option value="'+esc(city)+'">'+esc(city)+' · '+(cityCounts.get(city)||0)+'</option>').join('');
+    cityField.value = cities.includes(state.city) ? state.city : 'all';
+    $('cityQuickList').innerHTML = cities.map(city=>'<option value="'+esc(city)+'"></option>').join('');
+
+    const node = $('nicheFilter');
+    const groups = Object.keys(nicheCatalog);
+    const uncategorized = [...nicheCounts.keys()].filter(c=>!categoryToGroup[c]);
+    const categoryCount = category => nicheCounts.get(category)||0;
+    node.innerHTML = '<option value="all">Все ниши ('+state.leads.length+')</option>' + groups.map(group => {
+      const categories = nicheCatalog[group];
+      const total = categories.reduce((sum,category)=>sum+categoryCount(category),0);
+      return '<option value="group:'+esc(group)+'">'+esc(group)+' · '+total+'</option>' +
+        '<optgroup label="'+esc(group)+'">' + categories.map(category=>'<option value="'+esc(category)+'">'+esc(category)+' · '+categoryCount(category)+'</option>').join('') + '</optgroup>';
+    }).join('') + (uncategorized.length ? '<optgroup label="Другие категории">' + uncategorized.map(category=>'<option value="'+esc(category)+'">'+esc(category)+' · '+categoryCount(category)+'</option>').join('') + '</optgroup>':'');
+    const available = new Set([...Object.keys(categoryToGroup), ...uncategorized, ...groups.map(g=>'group:'+g)]);
+    if (!available.has(state.niche)) state.niche='all';
+    node.value=state.niche;
+    const loadedCities = cityCounts.size;
+    const loadedCategories = nicheCounts.size;
+    $('catalogSummary').innerHTML = '<span><strong>🌍 '+cities.length+' городов</strong> для сбора · <strong>'+loadedCities+'</strong> с данными</span><span><strong>◈ '+Object.keys(categoryToGroup).length+' ниш</strong> в каталоге · <strong>'+loadedCategories+'</strong> с данными</span><span class="catalog-summary-note">Цифра после города или ниши — количество компаний в загруженной базе, не число доступных бизнесов.</span>';
   }
   function visible() {
     let items = state.leads.filter(x => {
@@ -112,7 +139,8 @@
       if(confirmedNoSite&&c.websiteChecked!=='no')return false;
       if (state.view === 'pipeline' && c.status === 'new') return false;
       if (state.city !== 'all' && x.city !== state.city) return false;
-      if (state.niche !== 'all' && x.category !== state.niche) return false;
+      if (state.citySearch && !normalize(x.city).includes(normalize(state.citySearch))) return false;
+      if (state.niche !== 'all' && (state.niche.startsWith('group:') ? (x.group || categoryToGroup[x.category]) !== state.niche.slice(6) : x.category !== state.niche)) return false;
       if (state.website !== 'all' && (state.website === 'yes' ? x.site_status !== 'yes' : x.site_status !== 'missing')) return false;
       if (state.status !== 'all' && c.status !== state.status) return false;
       return normalize([x.name,x.city,x.category,x.address].join(' ')).includes(normalize(state.query));
@@ -145,9 +173,9 @@
     $('savedCount').textContent = saved; $('contactedCount').innerHTML = contacted + '<span class="stat-star">✶</span>'; $('navSaved').textContent = saved;
     const items = visible(); $('resultsCount').textContent = items.length + ' ' + (items.length % 10 === 1 && items.length % 100 !== 11 ? 'результат' : [2,3,4].includes(items.length % 10) && ![12,13,14].includes(items.length % 100) ? 'результата' : 'результатов');
     const openDetails = new Set([...$('list').querySelectorAll('.lead')].filter(el => el.querySelector('.crm-details[open]')).map(el => el.dataset.id));
-    $('list').innerHTML = items.length ? items.slice(0,pageLimit).map(itemHTML).join('') : '<div class="empty"><div class="empty-visual">✳</div><h3>Пока ничего не нашлось</h3><p>' + (state.view === 'saved' ? 'Нажми на сердечко у интересной компании — она появится здесь.' : state.view === 'pipeline' ? 'Отмечай отправленные сообщения и ответы — и увидишь их в своей воронке.' : 'Попробуй изменить фильтры. Если список только стартовый, новые компании появятся после запуска ежедневного обновления на GitHub.') + '</p></div>';
+    $('list').innerHTML = items.length ? items.slice(0,pageLimit).map(itemHTML).join('') : '<div class="empty"><div class="empty-visual">✳</div><h3>Пока ничего не нашлось</h3><p>' + (state.view === 'saved' ? 'Нажми на сердечко у интересной компании — она появится здесь.' : state.view === 'pipeline' ? 'Отмечай отправленные сообщения и ответы — и увидишь их в своей воронке.' : 'В выбранном городе или нише пока нет загруженных компаний. Это не значит, что там нет бизнесов. Сбор по новым городам запускается через GitHub Actions; проверь дату обновления, а пока выбери «Все города».') + '</p></div>';
     $('list').querySelectorAll('.lead').forEach(el => { if (openDetails.has(el.dataset.id)) { const details = el.querySelector('.crm-details'); if(details) details.open = true; } });
-    const remaining = Math.max(0, items.length - pageLimit); $('showMoreLeads').hidden = remaining === 0; $('showMoreLeads').textContent = remaining ? 'Показать ещё · ' + Math.min(80, remaining) + ' из ' + remaining : 'Показать ещё';
+    $('showMoreLeads').hidden = items.length <= pageLimit; $('showMoreLeads').textContent = 'Показать ещё · '+Math.min(80,items.length-pageLimit)+' из '+(items.length-pageLimit);
     const today=total.filter(o=>due(getCRM(o.id))).length; const alert=$('followUpSummary'); if(alert){alert.textContent=today?'⏰ Запланированных контактов на сегодня или раньше: '+today:'✓ Срочных повторных контактов нет';alert.classList.toggle('has-due',today>0);}
     const reached=total.filter(o=>['sent','replied','negotiation','deal'].includes(getCRM(o.id).status)).length;
     const responses=total.filter(o=>['replied','negotiation','deal'].includes(getCRM(o.id).status)).length;
@@ -163,6 +191,11 @@
     const niche = normalize(o.category);
     if (/кофе|кафе|пекар|кондитер|ресторан|фастфуд/.test(niche)) return ['меню, фото и маршрут', 'Красивое мобильное меню поможет гостям быстро увидеть ассортимент и найти заведение.'];
     if (/красот|парикмах|ателье|барбер/.test(niche)) return ['услуги, цены и запись', 'Страница с услугами, ценами и записью упростит первое знакомство.'];
+    if (/стоматолог|клиник|ветеринар|аптек|физиотерап/.test(niche)) return ['список услуг, часы работы и запись', 'Страница с услугами, специалистами и способом записи поможет посетителям сориентироваться.'];
+    if (/фитнес|спорт|танцев|йога|боулинг/.test(niche)) return ['расписание занятий и запись', 'Можно показать тренеров, стоимость и расписание на одном мобильном сайте.'];
+    if (/агентств|тур|недвижим|юридич|бухгалтер|консалт|страхован/.test(niche)) return ['описание услуг и заявку на консультацию', 'Краткая страница с преимуществами и формой обращения поможет потенциальным клиентам.'];
+    if (/обучен|школ|детск|репетитор/.test(niche)) return ['программы, расписание и запись', 'Можно удобно показать программы и стоимость занятий.'];
+    if (/отель|гостев|хостел|мобил|проживани/.test(niche)) return ['номера, фотографии и бронирование', 'Визитка с услугами, условиями и кнопкой связи пригодится гостям.'];
     if (/цвет/.test(niche)) return ['каталог букетов и заказ', 'Небольшой каталог с фото и кнопкой заказа пригодится покупателям.'];
     if (/авто|ремонт|техник|мастерск/.test(niche)) return ['услуги и заявку', 'Страница с услугами и быстрой заявкой помогает клиенту связаться.'];
     if (/магазин|книж|подар|зоо|одежд/.test(niche)) return ['витрину товаров и контакты', 'Удобная мини-витрина покажет ассортимент и варианты связи.'];
@@ -191,7 +224,8 @@
   $('list').addEventListener('change', e => { const root=e.target.closest('.lead'); if(!root)return; if(e.target.matches('[data-action="status"]')){ updateCRM(root.dataset.id,{status:e.target.value,updatedAt:new Date().toISOString()}); toast('Статус сохранён'); } else if(e.target.matches('[data-crm]')){const key=e.target.dataset.crm; if(!['priority','nextDate','verified','note','websiteChecked','channel','quote'].includes(key))return;const value=key==='verified'?e.target.checked:key==='quote'?Math.max(0,Math.min(5000000,Number(e.target.value)||0)):e.target.value;updateCRM(root.dataset.id,{[key]:value,updatedAt:new Date().toISOString(),...(key==='websiteChecked'?{verifiedAt:new Date().toISOString()}: {})}); toast('Карточка сохранена'); } });
   $('list').addEventListener('focusout',e=>{if(e.target.matches('textarea[data-crm="note"]')){const root=e.target.closest('.lead');if(root&&getCRM(root.dataset.id).note!==e.target.value)updateCRM(root.dataset.id,{note:e.target.value});}});
   $('searchInput').addEventListener('input', e => { state.query = e.target.value; render(); });
-  [['cityFilter','city'],['nicheFilter','niche'],['siteFilter','website']].forEach(([id,key]) => $(id).addEventListener('change', e => { state[key] = e.target.value; render(); }));
+  [['cityFilter','city'],['nicheFilter','niche'],['siteFilter','website']].forEach(([id,key]) => $(id).addEventListener('change', e => { state[key] = e.target.value; if(key==='city'){state.citySearch='';$('cityQuickInput').value='';}pageLimit=80; render(); }));
+  $('cityQuickInput').addEventListener('input', e=>{state.citySearch=e.target.value.trim();state.city='all';$('cityFilter').value='all';pageLimit=80;render();});
   document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { state.status = b.dataset.status; document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === b)); render(); }));
   document.querySelectorAll('[data-view]').forEach(a => a.addEventListener('click', () => { state.view = a.dataset.view; render(); document.getElementById('leadsSection').scrollIntoView({behavior:'smooth',block:'start'}); }));
   window.addEventListener('hashchange', () => { const view = location.hash.slice(1); if (['search','saved','pipeline'].includes(view)) { state.view=view; render(); }});
