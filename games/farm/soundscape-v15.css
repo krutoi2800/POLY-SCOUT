@@ -1,0 +1,12 @@
+/* Farm-only inline audio controls; also stays inside the fullscreen game HUD. */
+.farm-page .farm-sound-wrap{position:relative;display:inline-flex;gap:4px;align-items:center;vertical-align:middle;z-index:38}
+.farm-page .farm-sound-wrap .fullscreen-btn{white-space:nowrap}
+.farm-page .farm-sound-options{position:absolute;top:calc(100% + 7px);right:0;z-index:70;width:min(270px,88vw);padding:13px;background:#f6f8eb;color:#254938;box-shadow:0 10px 30px #15281b7c;border:1px solid #b6caaa;border-radius:13px;font:13px system-ui;display:flex;flex-direction:column;gap:9px;pointer-events:auto}
+.farm-page .farm-sound-options[hidden]{display:none!important}
+.farm-page .farm-sound-options label{display:flex;flex-direction:column;gap:3px;font-weight:600}
+.farm-page .farm-sound-options input{width:100%;accent-color:#569466}
+.farm-page .farm-sound-options button{border:0;border-radius:8px;background:#2a5b42;color:white;padding:9px;font-weight:700;cursor:pointer}
+.farm-page .farm-sound-options small{line-height:1.35;font-size:11px;color:#607e6c}
+.farm-playfield.farm-immersive .farm-sound-wrap{position:relative;z-index:50}
+.farm-playfield.farm-immersive .farm-sound-options{top:calc(100% + 10px)}
+@media(max-width:700px){.farm-page .farm-sound-wrap .fullscreen-btn{padding:5px 6px!important;font-size:11px!important}}
